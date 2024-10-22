@@ -44,5 +44,55 @@ public:
         return std::coroutine_handle<Promise>::from_promise(*this);
     }
     Promise &operator=(Promise &&) = delete;
+};
+
+template<class T = void, class P = Promise<T>>
+struct Task {
+private:
+    using promise_type = P;
+    std::coroutine_handle<promise_type> mCoroutine;
+public:
+    Task(std::coroutine_handle<promise_type> routine = nullptr) : mCoroutine(routine) {}
+
+    Task(Task &&that) noexcept : mCoroutine(that.mCoroutine) {
+        that.mCoroutine = nullptr;
+    }
+
+    Task &operator=(Task &&that) noexcept {
+        std::swap(mCoroutine, that.mCoroutine);
+    }
+
+    ~Task() {
+        if (mCoroutine)
+            mCoroutine.destroy();
+    }
+
+    struct Awaiter {
+    private:
+        std::coroutine_handle<promise_type> mCoroutine;
+    public:
+        bool await_ready() const noexcept {
+            return false;
+        };
+
+        /**
+         * 将当前协程句柄保存到 promise.mPrevious
+         * 并返回 mCoroutine, 用于控制协程的恢复。
+         * @param routine
+         * @return
+         */
+        std::coroutine_handle<promise_type>
+        await_suspended(std::coroutine_handle<promise_type> routine) const noexcept {
+            promise_type &promise = mCoroutine.promise();
+            promise.mPrevious = routine;
+            return mCoroutine;
+        }
+
+        T await_resume() const {
+            return mCoroutine.promise().result();
+        }
     };
+
+};
+
 }
