@@ -91,8 +91,41 @@ public:
         T await_resume() const {
             return mCoroutine.promise().result();
         }
-    };
 
+        /**
+         * 挂起当前协程
+         */
+        auto operator co_await() const noexcept {
+            return Awaiter(mCoroutine);
+        }
+
+        /**
+         * Task到std::coroutine_handle<promise_type>的隐式转换
+         * @return
+         */
+        operator std::coroutine_handle<promise_type>() const noexcept {
+            return mCoroutine;
+        }
+    };
 };
 
+/**
+ * 用于在事件循环中运行 Task 并等待结果
+ */
+template<class Loop, class T, class P>
+T run_task(Loop &loop, Task<T, P> const& t) {
+    auto a = t.operator co_await(); // 获取Awaiter对象a
+    a.await_suspend(std::noop_coroutine()).resume(); // 将当前协程挂起并准备恢复
+    while(loop.run()); // 运行直到没有更多的任务需要处理
+    return a.await_resume(); // 获取协程的返回值并返回
+}
+
+/**
+ * 用在并发情况下不需要等待结果时
+ */
+template <class T, class P>
+void spawn_task(Task<T, P> const &t) {
+    auto a = t.operator co_await();
+    a.await_suspend(std::noop_coroutine()).resume();
+}
 }
