@@ -2,6 +2,10 @@
 #include <coroutine>
 #include <optional>
 #include <vector>
+#include <span>
+#include <cstdint>
+#include <sys/epoll.h>
+#include <sys/ioctl.h>
 #include "error_handling.hpp"
 
 namespace co_async {
@@ -9,11 +13,11 @@ namespace co_async {
 using EpollEventMask = std::uint32_t;
 
 struct EpollFilePromise : Promise<EpollEventMask> {
-    std::coroutine_handle<> get() override {
+    auto get_return_object() {
         return std::coroutine_handle<EpollFilePromise>::from_promise(*this);
     }
     EpollFilePromise& operator=(EpollFilePromise&&) = delete;
-    ~EpollFilePromise();
+    inline ~EpollFilePromise();
     struct EpollFileAwaiter* m_epollAwaiter{};
 };
 
@@ -40,7 +44,10 @@ public:
 };
 
 struct EpollFileAwaiter {
-    static bool await_ready() noexcept { return false; }
+    EpollFileAwaiter(EpollLoop& loop, int fileno, EpollEventMask event) :
+            m_loop(loop), fileno(fileno), m_events(event){};
+
+    bool await_ready() const noexcept { return false; }
 
     void await_suspend(std::coroutine_handle<EpollFilePromise> coroutine) {
         auto &promise = coroutine.promise();
@@ -152,5 +159,52 @@ public:
 private:
     int m_fileNo;
 };
+
+/**
+ *
+ * @param loop 事件循环, 在一个循环中不断地检查注册的文件描述符的状态
+ * @param file 要监听的文件描述符
+ * @param events 要等待的事件类型(如可读、可写)
+ * @return
+ */
+inline Task<EpollEventMask, EpollFilePromise>
+wait_file_event(EpollLoop& loop, AsyncFile& file, EpollEventMask events) {
+        co_return co_await EpollFileAwaiter(loop, file.fileNo(), events);
+}
+/**
+ * 同步读取文件内容到提供的缓冲区
+ * @param file 要读取的文件
+ * @param buffer 连续的一段内存区间, 类似于一个轻量级的只读数组容器
+ * @return
+ */
+inline size_t readFileSync(AsyncFile& file, std::span<char> buffer) {
+    return checkErrorNonBlock(
+            read(file.fileNo(), buffer.data(), buffer.size())
+    );
+}
+/**
+ * 同步写入数据到文件
+ * @param file 要读取的文件
+ * @param buffer 要写入的数据缓冲区
+ * @return
+ */
+inline size_t writeFileSync(AsyncFile& file, std::span<char const> buffer) {
+    return checkErrorNonBlock(
+            write(file.fileNo(), buffer.data(), buffer.size()));
+}
+
+inline Task<size_t> read_file(EpollLoop& loop, AsyncFile& file,
+                              std::span<char> buffer) {
+    co_await wait_file_event(loop, file, EPOLLIN | EPOLLRDHUP);
+    auto len = readFileSync(file, buffer);
+    co_return len;
+}
+
+inline Task<size_t> write_file(EpollLoop& loop, AsyncFile& file,
+                               std::span<char const> buffer) {
+    co_await wait_file_event(loop, file, EPOLLIN | EPOLLRDHUP);
+    auto len = writeFileSync(file, buffer);
+    co_return len;
+}
 
 }
