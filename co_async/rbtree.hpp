@@ -14,8 +14,7 @@ namespace co_async {
         };
 
         struct RbNode {
-            RbNode() noexcept
-                    : left(nullptr),
+            RbNode() noexcept : left(nullptr),
             right(nullptr),
             parent(nullptr),
             tree(nullptr),

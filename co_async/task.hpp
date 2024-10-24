@@ -47,7 +47,7 @@ public:
 };
 
 template<class T = void, class P = Promise<T>>
-struct Task {
+struct [[nodiscard]] Task {
 private:
     using promise_type = P;
     std::coroutine_handle<promise_type> mCoroutine;
