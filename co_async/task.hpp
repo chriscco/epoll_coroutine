@@ -8,8 +8,8 @@ namespace co_async {
 template<class T>
 class Promise {
 private:
-    std::coroutine_handle<> mPrevious;
-    std::exception_ptr mException{};
+    std::coroutine_handle<> m_Previous;
+    std::exception_ptr m_Exception{};
 public:
     /**
      * 表示协程在开始时会被挂起, 直到外部代码显式恢复它
@@ -24,16 +24,16 @@ public:
      * @return
      */
     auto final_suspend() noexcept {
-        return Previous_awaiter(mPrevious);
+        return Previous_awaiter(m_Previous);
     }
 
     void unhandled_exception() noexcept {
-        mException = std::current_exception();
+        m_Exception = std::current_exception();
     }
 
     void result() {
-        if (mException) [[unlikely]] {
-            std::rethrow_exception(mException);
+        if (m_Exception) [[unlikely]] {
+            std::rethrow_exception(m_Exception);
         }
     }
 
@@ -42,6 +42,36 @@ public:
      * @return
      */
     virtual std::coroutine_handle<> get() = 0;
+
+    Promise &operator=(Promise &&) = delete;
+};
+
+template <>
+struct Promise<void> {
+    auto initial_suspend() noexcept {
+        return std::suspend_always();
+    }
+
+    auto final_suspend() noexcept {
+        return Previous_awaiter(m_Previous);
+    }
+
+    void unhandled_exception() noexcept {
+        m_Exception = std::current_exception();
+    }
+
+    void return_void() noexcept {}
+
+    void result() {
+        if (m_Exception) [[unlikely]] {
+            std::rethrow_exception(m_Exception);
+        }
+    }
+
+    virtual std::coroutine_handle<> get() = 0;
+
+    std::coroutine_handle<> m_Previous;
+    std::exception_ptr m_Exception{};
 
     Promise &operator=(Promise &&) = delete;
 };
@@ -63,8 +93,7 @@ public:
     }
 
     ~Task() {
-        if (mCoroutine)
-            mCoroutine.destroy();
+        if (mCoroutine) mCoroutine.destroy();
     }
 
     struct Awaiter {
@@ -76,7 +105,7 @@ public:
         };
 
         /**
-         * 将当前协程句柄保存到 promise.mPrevious
+         * 将当前协程句柄保存到 promise.m_Previous
          * 并返回 mCoroutine, 用于控制协程的恢复。
          * @param routine
          * @return
@@ -84,7 +113,7 @@ public:
         std::coroutine_handle<promise_type>
         await_suspended(std::coroutine_handle<promise_type> routine) const noexcept {
             promise_type &promise = mCoroutine.promise();
-            promise.mPrevious = routine;
+            promise.m_Previous = routine;
             return mCoroutine;
         }
 
