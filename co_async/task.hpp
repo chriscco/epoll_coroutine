@@ -8,7 +8,7 @@
 namespace co_async {
 
 template<class T>
-class Promise {
+struct Promise {
 public:
     /**
      * 表示协程在开始时会被挂起, 直到外部代码显式恢复它
