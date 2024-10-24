@@ -8,6 +8,8 @@
 #include <sys/ioctl.h>
 #include "error_handling.hpp"
 
+#define TEST 1
+
 namespace co_async {
 
 using EpollEventMask = std::uint32_t;
@@ -19,8 +21,55 @@ struct EpollFilePromise : Promise<void> {
     EpollFilePromise& operator=(EpollFilePromise&&) = delete;
     inline ~EpollFilePromise();
     struct EpollFileAwaiter* m_epollAwaiter{};
+
+    int mFileno;
+    uint32_t mEvents;
+};
+#if TEST
+struct EpollLoop {
+private:
+    int m_epoll = checkError(epoll_create(0));
+public:
+    void addListener(EpollFilePromise& promise) {
+        struct epoll_event event{};
+        event.events = promise.mEvents;
+        event.data.ptr = &promise;
+        checkError(epoll_ctl(m_epoll, EPOLL_CTL_ADD, promise.mFileno, &event));
+    }
+    void run() {
+        struct epoll_event events[10];
+        int res = checkError(epoll_wait(m_epoll, events, 10, -1));
+        for (int i = 0; i < res; i++) {
+            auto &event = events[i];
+            auto &promise = *(EpollFilePromise *) event.data.ptr;
+            checkError(epoll_ctl(m_epoll, EPOLL_CTL_DEL, promise.mFileno, nullptr));
+            std::coroutine_handle<EpollFilePromise>::from_promise(promise).resume();
+        }
+    }
+    ~EpollLoop() {
+        close(m_epoll);
+    }
+
+    EpollLoop &operator=(EpollLoop &&) = delete;
 };
 
+struct EpollFileAwaiter {
+    bool await_ready() const noexcept { return false; }
+
+    void await_suspend(std::coroutine_handle<EpollFilePromise> coroutine) const {
+        auto &promise = coroutine.promise();
+        promise.mFileno = mFileno;
+        promise.mEvents = mEvents;
+        loop.addListener(promise);
+    }
+    void await_resume() const noexcept {}
+
+    EpollLoop& loop;
+    int mFileno;
+    uint32_t mEvents;
+};
+
+#else
 struct EpollLoop {
 private:
     int m_epoll = checkError(epoll_create(0));
@@ -118,7 +167,7 @@ bool EpollLoop::run(std::optional<std::chrono::system_clock::duration> timeout) 
     }
     return true;
 }
-
+#endif
 /**
  * 管理异步文件描述符
  */
