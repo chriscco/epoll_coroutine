@@ -41,9 +41,8 @@ public:
      * 返回协程的句柄, 允许主程序通过句柄和协程交互
      * @return
      */
-    auto get() {
-        return std::coroutine_handle<Promise>::from_promise(*this);
-    }
+    virtual std::coroutine_handle<> get() = 0;
+
     Promise &operator=(Promise &&) = delete;
 };
 
