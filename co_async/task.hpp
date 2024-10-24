@@ -2,8 +2,9 @@
 #include <coroutine>
 #include <exception>
 #include <utility>
-#include "previous_waiter.hpp"
+#include "previous_awaiter.hpp"
 #include "uninitialized.hpp"
+#include "debug.hpp"
 
 namespace co_async {
 
@@ -21,26 +22,26 @@ struct Promise {
      * @return
      */
     auto final_suspend() noexcept {
-        return Previous_awaiter(m_Previous);
+        return Previous_awaiter(mPrevious);
     }
 
     void unhandled_exception() noexcept {
-        m_Exception = std::current_exception();
+        mException = std::current_exception();
     }
 
     void return_value(T &&ret) {
-        m_results.putValue(std::move(ret));
+        mResult.putValue(std::move(ret));
     }
 
     void return_value(T const &ret) {
-        m_results.putValue(ret);
+        mResult.putValue(ret);
     }
 
     T result() {
-        if (m_Exception) [[unlikely]] {
-            std::rethrow_exception(m_Exception);
+        if (mException) [[unlikely]] {
+            std::rethrow_exception(mException);
         }
-        return m_results.moveValue();
+        return mResult.moveValue();
     }
 
     /**
@@ -51,9 +52,9 @@ struct Promise {
         return std::coroutine_handle<Promise>::from_promise(*this);
     }
 
-    std::coroutine_handle<> m_Previous;
-    std::exception_ptr m_Exception{};
-    Uninitialized<T> m_results;
+    std::coroutine_handle<> mPrevious;
+    std::exception_ptr mException{};
+    Uninitialized<T> mResult;
 
     Promise &operator=(Promise &&) = delete;
 };
@@ -65,18 +66,18 @@ struct Promise<void> {
     }
 
     auto final_suspend() noexcept {
-        return Previous_awaiter(m_Previous);
+        return Previous_awaiter(mPrevious);
     }
 
     void unhandled_exception() noexcept {
-        m_Exception = std::current_exception();
+        mException = std::current_exception();
     }
 
     void return_void() noexcept {}
 
     void result() {
-        if (m_Exception) [[unlikely]] {
-            std::rethrow_exception(m_Exception);
+        if (mException) [[unlikely]] {
+            std::rethrow_exception(mException);
         }
     }
 
@@ -84,8 +85,8 @@ struct Promise<void> {
         return std::coroutine_handle<Promise>::from_promise(*this);
     }
 
-    std::coroutine_handle<> m_Previous;
-    std::exception_ptr m_Exception{};
+    std::coroutine_handle<> mPrevious;
+    std::exception_ptr mException{};
 
     Promise &operator=(Promise &&) = delete;
 };
@@ -93,7 +94,7 @@ struct Promise<void> {
 template<class T = void, class P = Promise<T>>
 struct [[nodiscard]] Task {
     using promise_type = P;
-public:
+
     Task(std::coroutine_handle<promise_type> routine = nullptr) noexcept : mCoroutine(routine) {}
 
     Task(Task &&that) noexcept : mCoroutine(that.mCoroutine) {
@@ -109,12 +110,11 @@ public:
     }
 
     struct Awaiter {
-        std::coroutine_handle<promise_type> mCoroutine;
         bool await_ready() const noexcept {
             return false;
-        };
+        }
         /**
-         * 将当前协程句柄保存到 promise.m_Previous
+         * 将当前协程句柄保存到 promise.mPrevious
          * 并返回 mCoroutine, 用于控制协程的恢复。
          * @param routine
          * @return
@@ -122,13 +122,14 @@ public:
         std::coroutine_handle<promise_type>
         await_suspend(std::coroutine_handle<> routine) const noexcept {
             promise_type &promise = mCoroutine.promise();
-            promise.m_Previous = routine;
+            promise.mPrevious = routine;
             return mCoroutine;
         }
-
         T await_resume() const {
             return mCoroutine.promise().result();
         }
+
+        std::coroutine_handle<promise_type> mCoroutine;
     };
 
     /**
@@ -145,7 +146,7 @@ public:
     operator std::coroutine_handle<promise_type>() const noexcept {
         return mCoroutine;
     }
-private:
+
     std::coroutine_handle<promise_type> mCoroutine;
 };
 
