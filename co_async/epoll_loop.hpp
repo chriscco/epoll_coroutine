@@ -84,7 +84,32 @@ void EpollLoop::removeListener(int Fileno) {
 }
 
 bool EpollLoop::run(std::optional<std::chrono::system_clock::duration> timeout) {
-
+    /* 逐个恢复挂起的协程 */
+    while (!m_queue.empty()) {
+        auto task = m_queue.back();
+        m_queue.pop_back();
+        task.resume();
+    }
+    if (m_count == 0) return false;
+    int timeoutMS = -1;
+    if (timeout) {
+        timeoutMS = std::chrono::duration_cast<std::chrono::milliseconds>(*timeout).count();
+    }
+    /* 等待事件发生 */
+    int res = checkError(epoll_wait(m_epoll, m_buffer, std::size(m_buffer), timeoutMS));
+    /* 将发生的事件信息写入相应的 promise.m_epollAwaiter->m_resumeEvents */
+    for (int i = 0; i < res; i++) {
+        auto &event = m_buffer[i];
+        auto &promise = *(EpollFilePromise *)event.data.ptr;
+        promise.m_epollAwaiter->m_resumeEvents = event.events;
+    }
+    /* 恢复所有相关的协程 */
+    for (int i = 0; i < res; i++) {
+        auto &event = m_buffer[i];
+        auto &promise = *(EpollFilePromise *)event.data.ptr;
+        std::coroutine_handle<EpollFilePromise>::from_promise(promise).resume();
+    }
+    return true;
 }
 
 }
