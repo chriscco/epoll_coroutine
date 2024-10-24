@@ -1,15 +1,14 @@
 #pragma once
 #include <coroutine>
-#include "previous_waiter.hpp"
 #include <exception>
+#include <utility>
+#include "previous_waiter.hpp"
+#include "uninitialized.hpp"
 
 namespace co_async {
 
 template<class T>
 class Promise {
-private:
-    std::coroutine_handle<> m_Previous;
-    std::exception_ptr m_Exception{};
 public:
     /**
      * 表示协程在开始时会被挂起, 直到外部代码显式恢复它
@@ -18,7 +17,6 @@ public:
     auto initial_suspend() noexcept {
         return std::suspend_always();
     }
-
     /**
      * 允许协程结束后恢复前一个协程
      * @return
@@ -31,18 +29,32 @@ public:
         m_Exception = std::current_exception();
     }
 
-    void result() {
+    void return_value(T &&ret) {
+        m_results.putValue(std::move(ret));
+    }
+
+    void return_value(T const &ret) {
+        m_results.putValue(ret);
+    }
+
+    T result() {
         if (m_Exception) [[unlikely]] {
             std::rethrow_exception(m_Exception);
         }
+        return m_results.moveValue();
     }
 
     /**
      * 返回协程的句柄, 允许主程序通过句柄和协程交互
      * @return
      */
-    virtual std::coroutine_handle<> get() = 0;
-
+    auto get_return_object() {
+        return std::coroutine_handle<Promise>::from_promise(*this);
+    }
+private:
+    std::coroutine_handle<> m_Previous;
+    std::exception_ptr m_Exception{};
+    Uninitialized<T> m_results;
     Promise &operator=(Promise &&) = delete;
 };
 
@@ -68,7 +80,9 @@ struct Promise<void> {
         }
     }
 
-    virtual std::coroutine_handle<> get() = 0;
+    auto get_return_object() {
+        return std::coroutine_handle<Promise>::from_promise(*this);
+    }
 
     std::coroutine_handle<> m_Previous;
     std::exception_ptr m_Exception{};
@@ -78,7 +92,6 @@ struct Promise<void> {
 
 template<class T = void, class P = Promise<T>>
 struct [[nodiscard]] Task {
-private:
     using promise_type = P;
     std::coroutine_handle<promise_type> mCoroutine;
 public:
