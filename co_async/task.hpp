@@ -9,7 +9,6 @@ namespace co_async {
 
 template<class T>
 struct Promise {
-public:
     /**
      * 表示协程在开始时会被挂起, 直到外部代码显式恢复它
      * @return
@@ -51,10 +50,11 @@ public:
     auto get_return_object() {
         return std::coroutine_handle<Promise>::from_promise(*this);
     }
-private:
+
     std::coroutine_handle<> m_Previous;
     std::exception_ptr m_Exception{};
     Uninitialized<T> m_results;
+
     Promise &operator=(Promise &&) = delete;
 };
 
@@ -93,9 +93,8 @@ struct Promise<void> {
 template<class T = void, class P = Promise<T>>
 struct [[nodiscard]] Task {
     using promise_type = P;
-    std::coroutine_handle<promise_type> mCoroutine;
 public:
-    Task(std::coroutine_handle<promise_type> routine = nullptr) : mCoroutine(routine) {}
+    Task(std::coroutine_handle<promise_type> routine = nullptr) noexcept : mCoroutine(routine) {}
 
     Task(Task &&that) noexcept : mCoroutine(that.mCoroutine) {
         that.mCoroutine = nullptr;
@@ -110,13 +109,10 @@ public:
     }
 
     struct Awaiter {
-    private:
         std::coroutine_handle<promise_type> mCoroutine;
-    public:
         bool await_ready() const noexcept {
             return false;
         };
-
         /**
          * 将当前协程句柄保存到 promise.m_Previous
          * 并返回 mCoroutine, 用于控制协程的恢复。
@@ -124,7 +120,7 @@ public:
          * @return
          */
         std::coroutine_handle<promise_type>
-        await_suspended(std::coroutine_handle<promise_type> routine) const noexcept {
+        await_suspend(std::coroutine_handle<> routine) const noexcept {
             promise_type &promise = mCoroutine.promise();
             promise.m_Previous = routine;
             return mCoroutine;
@@ -133,22 +129,24 @@ public:
         T await_resume() const {
             return mCoroutine.promise().result();
         }
-
-        /**
-         * 挂起当前协程
-         */
-        auto operator co_await() const noexcept {
-            return Awaiter(mCoroutine);
-        }
-
-        /**
-         * Task到std::coroutine_handle<promise_type>的隐式转换
-         * @return
-         */
-        operator std::coroutine_handle<promise_type>() const noexcept {
-            return mCoroutine;
-        }
     };
+
+    /**
+     * 挂起当前协程
+     */
+    auto operator co_await() const noexcept {
+        return Awaiter(mCoroutine);
+    }
+
+    /**
+     * Task到std::coroutine_handle<promise_type>的隐式转换
+     * @return
+     */
+    operator std::coroutine_handle<promise_type>() const noexcept {
+        return mCoroutine;
+    }
+private:
+    std::coroutine_handle<promise_type> mCoroutine;
 };
 
 /**
