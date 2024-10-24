@@ -63,6 +63,28 @@ struct EpollFileAwaiter {
 };
 
 EpollFilePromise::~EpollFilePromise() {
+    if (m_epollAwaiter) {
+        m_epollAwaiter->m_loop.removeListener(m_epollAwaiter->fileno);
+    }
+}
+
+bool EpollLoop::addListener(EpollFilePromise& promise, int control) {
+    struct epoll_event event{};
+    event.events = promise.m_epollAwaiter->m_events;
+    event.data.ptr = &promise;
+    int res = epoll_ctl(m_epoll, control, promise.m_epollAwaiter->fileno, &event);
+    if (res == -1) return false;
+    else if (control == EPOLL_CTL_ADD) m_count++;
+    return true;
+}
+
+void EpollLoop::removeListener(int Fileno) {
+    checkError(epoll_ctl(m_epoll, EPOLL_CTL_DEL, Fileno, nullptr));
+    --m_count;
+}
+
+bool EpollLoop::run(std::optional<std::chrono::system_clock::duration> timeout) {
+
 }
 
 }
