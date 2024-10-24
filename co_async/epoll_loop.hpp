@@ -100,16 +100,57 @@ bool EpollLoop::run(std::optional<std::chrono::system_clock::duration> timeout) 
     /* 将发生的事件信息写入相应的 promise.m_epollAwaiter->m_resumeEvents */
     for (int i = 0; i < res; i++) {
         auto &event = m_buffer[i];
-        auto &promise = *(EpollFilePromise *)event.data.ptr;
+        auto &promise = *(EpollFilePromise *) event.data.ptr;
         promise.m_epollAwaiter->m_resumeEvents = event.events;
     }
     /* 恢复所有相关的协程 */
     for (int i = 0; i < res; i++) {
         auto &event = m_buffer[i];
-        auto &promise = *(EpollFilePromise *)event.data.ptr;
+        auto &promise = *(EpollFilePromise *) event.data.ptr;
         std::coroutine_handle<EpollFilePromise>::from_promise(promise).resume();
     }
     return true;
 }
+
+/**
+ * 管理异步文件描述符
+ */
+struct [[nodiscard]] AsyncFile {
+public:
+    /* -1表示没有有效的文件描述符 */
+    AsyncFile() : m_fileNo(-1) {}
+
+    explicit AsyncFile(int fileNo) noexcept : m_fileNo(fileNo) {}
+
+    AsyncFile(AsyncFile &&that) noexcept : m_fileNo(that.m_fileNo) {
+        that.m_fileNo = -1;
+    }
+
+    AsyncFile &operator=(AsyncFile &&that) noexcept {
+        std::swap(m_fileNo, that.m_fileNo);
+        return *this;
+    }
+
+    ~AsyncFile() {
+        if (m_fileNo != -1) close(m_fileNo);
+    }
+
+    int fileNo() const noexcept {
+        return m_fileNo;
+    }
+
+    int releaseOwnership() noexcept {
+        int ret = m_fileNo;
+        m_fileNo = -1;
+        return ret;
+    }
+
+    void setNonblock() const {
+        int attr = 1;
+        checkError(ioctl(fileNo(), FIONBIO, &attr));
+    }
+private:
+    int m_fileNo;
+};
 
 }
