@@ -9,7 +9,7 @@ struct SleepUntilPromise : RbTree<SleepUntilPromise>::RbNode, Promise<void> {
     /* 储存计时器的过期时间点 */
     std::chrono::system_clock::time_point mExpireTime;
 
-    auto get() {
+    std::coroutine_handle<> get() {
         return std::coroutine_handle<SleepUntilPromise>::from_promise(*this);
     }
 
