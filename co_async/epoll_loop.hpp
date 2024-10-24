@@ -12,7 +12,7 @@ namespace co_async {
 
 using EpollEventMask = std::uint32_t;
 
-struct EpollFilePromise : Promise<EpollEventMask> {
+struct EpollFilePromise : Promise<void> {
     auto get_return_object() {
         return std::coroutine_handle<EpollFilePromise>::from_promise(*this);
     }
@@ -160,6 +160,7 @@ private:
     int m_fileNo;
 };
 
+#if 0
 /**
  *
  * @param loop 事件循环, 在一个循环中不断地检查注册的文件描述符的状态
@@ -206,5 +207,5 @@ inline Task<size_t> write_file(EpollLoop& loop, AsyncFile& file,
     auto len = writeFileSync(file, buffer);
     co_return len;
 }
-
+#endif
 }
