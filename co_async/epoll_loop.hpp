@@ -19,7 +19,7 @@ struct EpollFilePromise : Promise<void> {
         return std::coroutine_handle<EpollFilePromise>::from_promise(*this);
     }
     EpollFilePromise& operator=(EpollFilePromise&&) = delete;
-    inline ~EpollFilePromise();
+    inline ~EpollFilePromise(){};
     struct EpollFileAwaiter* m_epollAwaiter{};
 
     int mFileno;
@@ -46,9 +46,6 @@ public:
             std::coroutine_handle<EpollFilePromise>::from_promise(promise).resume();
         }
     }
-    ~EpollLoop() {
-        close(m_epoll);
-    }
 
     EpollLoop &operator=(EpollLoop &&) = delete;
 };
@@ -63,6 +60,8 @@ struct EpollFileAwaiter {
         loop.addListener(promise);
     }
     void await_resume() const noexcept {}
+
+    ~EpollFileAwaiter() {};
 
     EpollLoop& loop;
     int mFileno;
@@ -209,7 +208,7 @@ private:
     int m_fileNo;
 };
 
-#if 0
+#if !TEST
 /**
  *
  * @param loop 事件循环, 在一个循环中不断地检查注册的文件描述符的状态

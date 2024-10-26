@@ -1,44 +1,52 @@
-
 #include <sys/epoll.h>
 #include <sys/ioctl.h>
 #include <sys/errno.h>
-#include <cstdio>
-#include <string.h>
-#include "utils/debug.hpp"
+#include <cstring>
+#include "co_async/debug.hpp"
+#include "co_async/timer_loop.hpp"
+#include "co_async/task.hpp"
+#include "co_async/epoll_loop.hpp"
+
+co_async::EpollLoop g_loop;
+
+inline co_async::Task<void, co_async::EpollFilePromise>
+wait_file(co_async::EpollLoop &loop, int fileno, co_async::EpollEventMask events) {
+    co_await co_async::EpollFileAwaiter(loop, fileno, events);
+}
+
+co_async::Task<std::string> reader() {
+    co_await wait_file(g_loop, 0, EPOLLIN);
+    std::string s;
+    while (true) {
+        char c;
+        ssize_t len = read(0, &c, 1);
+        if (len == -1) {
+            if (errno == EWOULDBLOCK) [[unlikely]] {
+                throw std::system_error(errno, std::system_category());
+            }
+            break;
+        }
+        s.push_back(c);
+    }
+    co_return s;
+}
+
+co_async::Task<void> async_main() {
+    while (true) {
+        auto s = co_await reader();
+        debug(), "has input:", s;
+        if (s == "quit\n") break;
+    }
+}
 
 int main() {
-    // 0号输入流设为非阻塞, 如果read()没有收到消息就会返回EWOULDBLOCK;
     int attr = 1;
     ioctl(0, FIONBIO, &attr);
 
-    int epfd = epoll_create1(0);
-
-    struct epoll_event event;
-    event.events = EPOLLIN;
-    event.data.fd = 0;
-    epoll_ctl(epfd, EPOLL_CTL_ADD, 0, &event);
-
-    while (true) {
-        struct epoll_event ebuf[10];
-        int res = epoll_wait(epfd, ebuf, 10, 2000);
-        if (res == -1) debug(), "epoll error", strerror(errno);
-
-        if (res == 0) debug(), "No input over 2 seconds...";
-
-        for (int i = 0; i < res; i++) {
-            debug(), "Has Data!";
-            int fd = (int) ebuf[i].data.fd;
-            char c;
-            while (true) {
-                int len = (int)read(fd, &c, 1);
-                if (len <= 0) { // 阻塞
-                    debug(), "len <= 0, blocked";
-                    break;
-                }
-                debug(), c;
-            }
-            debug(), (int) ebuf[i].events, (int) ebuf[i].data.fd;
-        }
+    auto t = async_main();
+    t.mCoroutine.resume();
+    if (!t.mCoroutine.done()) {
+        g_loop.run();
     }
     return 0;
 }
