@@ -77,6 +77,8 @@ public:
 
     bool await_ready() const noexcept { return false; }
 
+    void await_resume() const noexcept {}
+
     /**
      * 在协程挂起时被调用
      * 它将过期时间设置到对应的 SleepUntilPromise 对象中
