@@ -19,7 +19,9 @@ struct EpollFilePromise : Promise<void> {
         return std::coroutine_handle<EpollFilePromise>::from_promise(*this);
     }
     EpollFilePromise& operator=(EpollFilePromise&&) = delete;
-    inline ~EpollFilePromise(){};
+
+    // inline ~EpollFilePromise();
+
     struct EpollFileAwaiter* m_epollAwaiter{};
 
     int mFileno;
@@ -28,7 +30,7 @@ struct EpollFilePromise : Promise<void> {
 #if TEST
 struct EpollLoop {
 private:
-    int m_epoll = checkError(epoll_create(0));
+    int m_epoll = checkError(epoll_create1(0));
 public:
     void addListener(EpollFilePromise& promise) {
         struct epoll_event event{};
@@ -36,18 +38,23 @@ public:
         event.data.ptr = &promise;
         checkError(epoll_ctl(m_epoll, EPOLL_CTL_ADD, promise.mFileno, &event));
     }
-    void run() {
+    void run() const {
         struct epoll_event events[10];
         int res = checkError(epoll_wait(m_epoll, events, 10, -1));
         for (int i = 0; i < res; i++) {
             auto &event = events[i];
             auto &promise = *(EpollFilePromise *) event.data.ptr;
-            checkError(epoll_ctl(m_epoll, EPOLL_CTL_DEL, promise.mFileno, nullptr));
+            checkError(epoll_ctl(m_epoll, EPOLL_CTL_DEL, promise.mFileno, NULL));
+            printf("promise: %d\n", promise.mEvents);
             std::coroutine_handle<EpollFilePromise>::from_promise(promise).resume();
         }
     }
 
     EpollLoop &operator=(EpollLoop &&) = delete;
+
+    ~EpollLoop() {
+        close(m_epoll);
+    }
 };
 
 struct EpollFileAwaiter {
@@ -61,7 +68,7 @@ struct EpollFileAwaiter {
     }
     void await_resume() const noexcept {}
 
-    ~EpollFileAwaiter() {};
+    // ~EpollFileAwaiter() {};
 
     EpollLoop& loop;
     int mFileno;

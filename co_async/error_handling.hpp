@@ -1,5 +1,4 @@
 #pragma once
-
 namespace co_async {
 #ifndef NDEBUG
 /* C语言错误码转换成C++错误码 */

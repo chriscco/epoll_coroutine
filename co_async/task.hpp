@@ -61,11 +61,11 @@ struct Promise {
 
 template <>
 struct Promise<void> {
-    auto initial_suspend() noexcept {
+    auto initial_suspend() const noexcept {
         return std::suspend_always();
     }
 
-    auto final_suspend() noexcept {
+    auto final_suspend() const noexcept {
         return Previous_awaiter(mPrevious);
     }
 
