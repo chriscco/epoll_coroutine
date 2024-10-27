@@ -35,13 +35,20 @@ struct EpollLoop {
 public:
     void addListener(EpollFilePromise& promise) {
         struct epoll_event event{};
-        event.events = promise.mEvents;
-        event.data.ptr = &promise;
+        event.events = promise.mEvents; // 监听可读事件
+        event.data.ptr = &promise; // 指向用户数据
         checkError(epoll_ctl(m_epoll, EPOLL_CTL_ADD, promise.mFileno, &event));
     }
     void removeListener(int fileNo) {
         checkError(epoll_ctl(m_epoll, EPOLL_CTL_DEL, fileNo, nullptr));
     }
+    /**
+     * 进入事件循环, 等待和处理 I/O 事件
+     * 调用 epoll_wait 函数, 等待指定的时间(timeout)以获取 I/O 事件
+     * 处理返回的事件, 将每个事件的 data.ptr 字段转换为 EpollFilePromise
+     * 并调用其对应的协程句柄的 resume() 方法, 恢复协程的执行。
+     * @param timeout
+     */
     void run(int timeout) {
         int res = checkError(epoll_wait(m_epoll, event_buffer, std::size(event_buffer), timeout));
         for (int i = 0; i < res; i++) {
@@ -64,8 +71,17 @@ EpollFilePromise::~EpollFilePromise() {
 }
 
 struct EpollFileAwaiter {
+    /**
+     * 假设永远需要被挂起
+     * @return
+     */
     bool await_ready() const noexcept { return false; }
 
+    /**
+     * 当调用co_await时会使用这个函数
+     * 决定如何挂起当前协程, 并将控制权交给其他部分(例如事件循环或调度器)
+     * @param coroutine
+     */
     void await_suspend(std::coroutine_handle<EpollFilePromise> coroutine) const {
         auto &promise = coroutine.promise();
         promise.mLoop = &loop;
@@ -73,9 +89,12 @@ struct EpollFileAwaiter {
         promise.mEvents = mEvents;
         loop.addListener(promise);
     }
-    void await_resume() const noexcept {}
 
-    // ~EpollFileAwaiter() {};
+    /**
+     * 异步操作完成并且协程被恢复时被调用
+     * 返回协程结果或抛出异常
+     */
+    void await_resume() const noexcept {}
 
     EpollLoop& loop;
     int mFileno;
