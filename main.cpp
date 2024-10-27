@@ -21,7 +21,7 @@ co_async::TimerLoop timer_loop;
  * events | EPOLLONESHOT 表示这个事件在触发后只会被监听一次
  * @param loop
  * @param fileno
- * @param events
+ * @param events uint32_t
  * @return
  */
 inline co_async::Task<void, co_async::EpollFilePromise>
