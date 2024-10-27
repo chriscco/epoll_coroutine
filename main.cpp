@@ -1,7 +1,7 @@
 #include <sys/epoll.h>
 #include <sys/ioctl.h>
 #include <sys/errno.h>
-#include <cstring>
+#include <string>
 #include "co_async/debug.hpp"
 #include "co_async/timer_loop.hpp"
 #include "co_async/task.hpp"
@@ -21,7 +21,7 @@ co_async::Task<std::string> reader() {
         char c;
         ssize_t len = read(0, &c, 1);
         if (len == -1) {
-            if (errno == EWOULDBLOCK) [[unlikely]] {
+            if (errno != EWOULDBLOCK) [[unlikely]] {
                 throw std::system_error(errno, std::system_category());
             }
             break;
@@ -45,7 +45,7 @@ int main() {
 
     auto t = async_main();
     t.mCoroutine.resume();
-    if (!t.mCoroutine.done()) {
+    while (!t.mCoroutine.done()) {
         g_loop.run();
     }
     return 0;
