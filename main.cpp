@@ -8,6 +8,9 @@
 #include "co_async/task.hpp"
 #include "co_async/epoll_loop.hpp"
 
+/* timeout内没有输入时会输出信息 */
+#define WHEN_ANY
+
 using namespace std::chrono_literals;
 
 /* 处理IO事件的循环 */
@@ -35,11 +38,16 @@ wait_file(co_async::EpollLoop &loop, int fileno, co_async::EpollEventMask events
  * @return
  */
 co_async::Task<std::string> reader() {
+#ifndef WHEN_ANY
+    auto which = co_await when_all(wait_file(epoll_loop, 0, EPOLLIN),
+               co_async::sleep_for(timer_loop, 1s));
+#else
     auto which = co_await when_any(wait_file(epoll_loop, 0, EPOLLIN),
                co_async::sleep_for(timer_loop, 1s));
     if (which.index() != 0) {
-        co_return "no input over a sec";
+        co_return "No Input Over 1 Second";
     }
+#endif
     std::string s;
     while (true) {
         char c;
@@ -58,7 +66,7 @@ co_async::Task<std::string> reader() {
 co_async::Task<void> async_main() {
     while (true) {
         auto s = co_await reader();
-        debug(), "has input:", s;
+        debug(), "Receives Input: ", s;
         if (s == "quit\n") break;
     }
 }

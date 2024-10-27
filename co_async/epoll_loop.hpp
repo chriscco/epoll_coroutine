@@ -8,6 +8,7 @@
 #include <sys/ioctl.h>
 #include "error_handling.hpp"
 #include "when_any.hpp"
+#include "when_all.hpp"
 
 #define TEST 1
 
@@ -35,7 +36,7 @@ struct EpollLoop {
 public:
     void addListener(EpollFilePromise& promise) {
         struct epoll_event event{};
-        event.events = promise.mEvents; // 监听可读事件
+        event.events = promise.mEvents | EPOLLONESHOT; // 监听可读事件
         event.data.ptr = &promise; // 指向用户数据
         checkError(epoll_ctl(m_epoll, EPOLL_CTL_ADD, promise.mFileno, &event));
     }
