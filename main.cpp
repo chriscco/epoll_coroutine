@@ -2,20 +2,30 @@
 #include <sys/ioctl.h>
 #include <sys/errno.h>
 #include <string>
+#include <chrono>
 #include "co_async/debug.hpp"
 #include "co_async/timer_loop.hpp"
 #include "co_async/task.hpp"
 #include "co_async/epoll_loop.hpp"
 
-co_async::EpollLoop g_loop;
+using namespace std::chrono_literals;
+
+/* 处理IO事件的循环 */
+co_async::EpollLoop epoll_loop;
+/* 处理定时器事件 */
+co_async::TimerLoop timer_loop;
 
 inline co_async::Task<void, co_async::EpollFilePromise>
 wait_file(co_async::EpollLoop &loop, int fileno, co_async::EpollEventMask events) {
-    co_await co_async::EpollFileAwaiter(loop, fileno, events);
+    co_await co_async::EpollFileAwaiter(loop, fileno, events | EPOLLONESHOT);
 }
 
 co_async::Task<std::string> reader() {
-    co_await wait_file(g_loop, 0, EPOLLIN);
+    auto which = co_await when_any(wait_file(epoll_loop, 0, EPOLLIN),
+               co_async::sleep_for(timer_loop, 1s));
+    if (which.index() != 0) {
+        co_return "no input over a sec";
+    }
     std::string s;
     while (true) {
         char c;
@@ -46,7 +56,12 @@ int main() {
     auto t = async_main();
     t.mCoroutine.resume();
     while (!t.mCoroutine.done()) {
-        g_loop.run();
+        if (auto delay = timer_loop.run()) {
+            auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(*delay).count();
+            epoll_loop.run(ms);
+        } else {
+            epoll_loop.run(-1);
+        }
     }
     return 0;
 }

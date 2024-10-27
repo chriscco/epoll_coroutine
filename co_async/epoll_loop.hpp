@@ -7,6 +7,7 @@
 #include <sys/epoll.h>
 #include <sys/ioctl.h>
 #include "error_handling.hpp"
+#include "when_any.hpp"
 
 #define TEST 1
 
@@ -20,17 +21,17 @@ struct EpollFilePromise : Promise<void> {
     }
     EpollFilePromise& operator=(EpollFilePromise&&) = delete;
 
-    // inline ~EpollFilePromise();
+    inline ~EpollFilePromise();
 
     struct EpollFileAwaiter* m_epollAwaiter{};
 
+    struct EpollLoop* mLoop;
     int mFileno;
     uint32_t mEvents;
 };
+
 #if TEST
 struct EpollLoop {
-private:
-    int m_epoll = checkError(epoll_create1(0));
 public:
     void addListener(EpollFilePromise& promise) {
         struct epoll_event event{};
@@ -38,30 +39,36 @@ public:
         event.data.ptr = &promise;
         checkError(epoll_ctl(m_epoll, EPOLL_CTL_ADD, promise.mFileno, &event));
     }
-    void run() const {
-        struct epoll_event events[10];
-        int res = checkError(epoll_wait(m_epoll, events, 10, -1));
+    void removeListener(int fileNo) {
+        checkError(epoll_ctl(m_epoll, EPOLL_CTL_DEL, fileNo, nullptr));
+    }
+    void run(int timeout) {
+        int res = checkError(epoll_wait(m_epoll, event_buffer, std::size(event_buffer), timeout));
         for (int i = 0; i < res; i++) {
-            auto &event = events[i];
+            auto &event = event_buffer[i];
             auto &promise = *(EpollFilePromise *) event.data.ptr;
-            checkError(epoll_ctl(m_epoll, EPOLL_CTL_DEL, promise.mFileno, NULL));
-            printf("promise: %d\n", promise.mEvents);
             std::coroutine_handle<EpollFilePromise>::from_promise(promise).resume();
         }
     }
-
     EpollLoop &operator=(EpollLoop &&) = delete;
-
     ~EpollLoop() {
         close(m_epoll);
     }
+private:
+    int m_epoll = checkError(epoll_create1(0));
+    struct epoll_event event_buffer[64];
 };
+
+EpollFilePromise::~EpollFilePromise() {
+    mLoop->removeListener(mFileno);
+}
 
 struct EpollFileAwaiter {
     bool await_ready() const noexcept { return false; }
 
     void await_suspend(std::coroutine_handle<EpollFilePromise> coroutine) const {
         auto &promise = coroutine.promise();
+        promise.mLoop = &loop;
         promise.mFileno = mFileno;
         promise.mEvents = mEvents;
         loop.addListener(promise);
@@ -174,6 +181,7 @@ bool EpollLoop::run(std::optional<std::chrono::system_clock::duration> timeout) 
     return true;
 }
 #endif
+
 /**
  * 管理异步文件描述符
  */
