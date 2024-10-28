@@ -16,7 +16,7 @@ namespace co_async {
 
 using EpollEventMask = std::uint32_t;
 
-struct EpollFilePromise : Promise<void> {
+struct EpollFilePromise : Promise<EpollEventMask> {
     auto get_return_object() {
         return std::coroutine_handle<EpollFilePromise>::from_promise(*this);
     }
@@ -24,40 +24,17 @@ struct EpollFilePromise : Promise<void> {
 
     inline ~EpollFilePromise();
 
-    struct EpollFileAwaiter* m_epollAwaiter{};
-
-    struct EpollLoop* mLoop;
-    int mFileno;
-    uint32_t mEvents;
+    struct EpollFileAwaiter* m_epollAwaiter;
 };
 
 #if TEST
 struct EpollLoop {
 public:
-    void addListener(EpollFilePromise& promise) {
-        struct epoll_event event{};
-        event.events = promise.mEvents | EPOLLONESHOT; // 监听可读事件
-        event.data.ptr = &promise; // 指向用户数据
-        checkError(epoll_ctl(m_epoll, EPOLL_CTL_ADD, promise.mFileno, &event));
-    }
-    void removeListener(int fileNo) {
-        checkError(epoll_ctl(m_epoll, EPOLL_CTL_DEL, fileNo, nullptr));
-    }
-    /**
-     * 进入事件循环, 等待和处理 I/O 事件
-     * 调用 epoll_wait 函数, 等待指定的时间(timeout)以获取 I/O 事件
-     * 处理返回的事件, 将每个事件的 data.ptr 字段转换为 EpollFilePromise
-     * 并调用其对应的协程句柄的 resume() 方法, 恢复协程的执行。
-     * @param timeout
-     */
-    void run(int timeout) {
-        int res = checkError(epoll_wait(m_epoll, event_buffer, std::size(event_buffer), timeout));
-        for (int i = 0; i < res; i++) {
-            auto &event = event_buffer[i];
-            auto &promise = *(EpollFilePromise *) event.data.ptr;
-            std::coroutine_handle<EpollFilePromise>::from_promise(promise).resume();
-        }
-    }
+
+    inline bool addListener(EpollFilePromise& promise);
+    inline void removeListener(int Fileno);
+    inline bool run(std::optional<std::chrono::system_clock::duration> timeout = std::nullopt);
+
     EpollLoop &operator=(EpollLoop &&) = delete;
     ~EpollLoop() {
         close(m_epoll);
@@ -66,10 +43,6 @@ private:
     int m_epoll = checkError(epoll_create1(0));
     struct epoll_event event_buffer[64];
 };
-
-EpollFilePromise::~EpollFilePromise() {
-    mLoop->removeListener(mFileno);
-}
 
 struct EpollFileAwaiter {
     /**
@@ -83,11 +56,9 @@ struct EpollFileAwaiter {
      * 决定如何挂起当前协程, 并将控制权交给其他部分(例如事件循环或调度器)
      * @param coroutine
      */
-    void await_suspend(std::coroutine_handle<EpollFilePromise> coroutine) const {
+    void await_suspend(std::coroutine_handle<EpollFilePromise> coroutine) {
         auto &promise = coroutine.promise();
-        promise.mLoop = &loop;
-        promise.mFileno = mFileno;
-        promise.mEvents = mEvents;
+        promise.m_epollAwaiter = this;
         loop.addListener(promise);
     }
 
@@ -95,12 +66,68 @@ struct EpollFileAwaiter {
      * 异步操作完成并且协程被恢复时被调用
      * 返回协程结果或抛出异常
      */
-    void await_resume() const noexcept {}
+    EpollEventMask await_resume() const noexcept {}
 
     EpollLoop& loop;
     int mFileno;
-    uint32_t mEvents;
+    EpollEventMask mEvents;
+    EpollEventMask mResumeEvents;
 };
+
+bool EpollLoop::addListener(EpollFilePromise& promise) {
+    struct epoll_event event{};
+    event.events = promise.m_epollAwaiter->mEvents | EPOLLONESHOT; // 监听可读事件
+    event.data.ptr = &promise; // 指向用户数据
+    checkError(epoll_ctl(m_epoll, EPOLL_CTL_ADD, promise.m_epollAwaiter->mFileno, &event));
+}
+
+void EpollLoop::removeListener(int fileNo) {
+    checkError(epoll_ctl(m_epoll, EPOLL_CTL_DEL, fileNo, nullptr));
+}
+
+/**
+ * 进入事件循环, 等待和处理 I/O 事件
+ * 调用 epoll_wait 函数, 等待指定的时间(timeout)以获取 I/O 事件
+ * 处理返回的事件, 将每个事件的 data.ptr 字段转换为 EpollFilePromise
+ * 并调用其对应的协程句柄的 resume() 方法, 恢复协程的执行。
+ * @param timeout
+ */
+bool EpollLoop::run(std::optional<std::chrono::system_clock::duration> timeout) {
+    /* 逐个恢复挂起的协程 */
+    /*
+    while (!m_queue.empty()) {
+        auto task = m_queue.back();
+        m_queue.pop_back();
+        task.resume();
+    }
+    if (m_count == 0) return false;
+    */
+    int timeoutMS = -1;
+    if (timeout) {
+        timeoutMS = std::chrono::duration_cast<std::chrono::milliseconds>(*timeout).count();
+    }
+    /* 等待事件发生 */
+    int res = checkError(epoll_wait(m_epoll, event_buffer, std::size(event_buffer), timeoutMS));
+    /* 将发生的事件信息写入相应的 promise.m_epollAwaiter->m_resumeEvents */
+    for (int i = 0; i < res; i++) {
+        auto &event = event_buffer[i];
+        auto &promise = *(EpollFilePromise *) event.data.ptr;
+        promise.m_epollAwaiter->mResumeEvents = event.events;
+    }
+    /* 恢复所有相关的协程 */
+    for (int i = 0; i < res; i++) {
+        auto &event = event_buffer[i];
+        auto &promise = *(EpollFilePromise *) event.data.ptr;
+        std::coroutine_handle<EpollFilePromise>::from_promise(promise).resume();
+    }
+    return true;
+}
+
+EpollFilePromise::~EpollFilePromise() {
+    if (m_epollAwaiter) [[likely]] {
+        m_epollAwaiter->loop.removeListener(m_epollAwaiter->mFileno);
+    }
+}
 
 #else
 struct EpollLoop {
@@ -243,7 +270,7 @@ private:
     int m_fileNo;
 };
 
-#if !TEST
+
 /**
  *
  * @param loop 事件循环, 在一个循环中不断地检查注册的文件描述符的状态
@@ -290,5 +317,4 @@ inline Task<size_t> write_file(EpollLoop& loop, AsyncFile& file,
     auto len = writeFileSync(file, buffer);
     co_return len;
 }
-#endif
 }
