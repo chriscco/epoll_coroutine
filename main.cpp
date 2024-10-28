@@ -3,6 +3,7 @@
 #include <sys/errno.h>
 #include <string>
 #include <chrono>
+#include <fcntl.h>
 #include "co_async/debug.hpp"
 #include "co_async/timer_loop.hpp"
 #include "co_async/task.hpp"
@@ -10,6 +11,7 @@
 
 /* timeout内没有输入时会输出信息 */
 #define WHEN_ANY
+#define TEST 1
 
 using namespace std::chrono_literals;
 
@@ -37,8 +39,8 @@ wait_file(co_async::EpollLoop &loop, int fileno, co_async::EpollEventMask events
  * 使用 when_any, 它同时等待两个事件: 从输入读取数据或在 1 秒内超时
  * @return
  */
-co_async::Task<std::string> reader() {
-#ifndef WHEN_ANY
+co_async::Task<std::string> reader(int fileno) {
+#ifndef WHEN_ANY /* 当输入过快时会等待当前所有输入完成后再输出 */
     auto which = co_await when_all(wait_file(epoll_loop, 0, EPOLLIN),
                co_async::sleep_for(timer_loop, 1s));
 #else
@@ -48,24 +50,40 @@ co_async::Task<std::string> reader() {
         co_return "No Input Over 1 Second";
     }
 #endif
+#if !TEST
+    co_await wait_file(epoll_loop, fileno, EPOLLIN);
     std::string s;
+    size_t chunk = 8;
     while (true) {
         char c;
-        ssize_t len = read(0, &c, 1);
+        size_t exist = s.size();
+        s.resize(exist + chunk);
+        ssize_t len = read(fileno, s.data() + exist, chunk);
         if (len == -1) {
             if (errno != EWOULDBLOCK) [[unlikely]] {
                 throw std::system_error(errno, std::system_category());
             }
+        }
+        if (len != chunk) {
+            s.resize(exist + len);
             break;
         }
-        s.push_back(c);
+        if (chunk < 65536) chunk *= 4;
     }
     co_return s;
 }
+#endif
+
+co_async::Task<std::string> read_string(int fileno) {
+
+}
 
 co_async::Task<void> async_main() {
+    int file = co_async::checkError(open("/dev/stdin", O_RDONLY | O_NONBLOCK));
     while (true) {
-        auto s = co_await reader();
+        auto res = co_await when_any(reader(EPOLLIN), reader(file));
+        std::string s;
+        std::visit([&s](std::string const& res) { s = res; }, res);
         debug(), "Receives Input: ", s;
         if (s == "quit\n") break;
     }
