@@ -161,6 +161,15 @@ T run_task(Loop &loop, Task<T, P> const& t) {
     return a.await_resume(); // 获取协程的返回值并返回
 }
 
+// 特化 run_task 以处理 Task<>
+template<class Loop>
+void run_task(Loop &loop, Task<> const& t) {
+    auto a = t.operator co_await();
+    a.await_suspend(std::noop_coroutine()).resume();
+    while (loop.run());
+    a.await_resume(); // 对于 Task<>，没有返回值
+}
+
 /**
  * 用在并发情况下不需要等待结果时
  */

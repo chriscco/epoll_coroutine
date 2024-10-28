@@ -10,7 +10,7 @@
 #include "when_any.hpp"
 #include "when_all.hpp"
 
-#define TEST 1
+#define TEST 0
 
 namespace co_async {
 
@@ -132,7 +132,7 @@ EpollFilePromise::~EpollFilePromise() {
 #else
 struct EpollLoop {
 private:
-    int m_epoll = checkError(epoll_create(0));
+    int m_epoll = checkError(epoll_create1(0));
     size_t m_count = 0;
     struct epoll_event m_buffer[64];
     std::vector<std::coroutine_handle<>> m_queue;
